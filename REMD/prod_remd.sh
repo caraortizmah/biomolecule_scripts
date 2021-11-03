@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 
 #This script copies a list of temperatures (2nd column) in a numerated list (1st column) from a FILE_LIST
 # having that information and creates new copies of gromacs input file.
