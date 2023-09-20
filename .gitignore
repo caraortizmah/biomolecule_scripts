@@ -1,0 +1,11 @@
+# ignore all .csv (inputs for XAS plot)
+*.csv
+# ignore all .out (ORCA and pipeline outputs)
+*.out
+# ignore all .out.absq.dat (ORCA output plots)
+*.out.absq.dat
+# all temporary files
+*.tmp
+# all svg images
+*.svg
+
