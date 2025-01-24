@@ -84,13 +84,19 @@ def create_AB_distance(atoms, delta_d, position_lim, armin=True):
     if armin:
         # Main axis (smallest eigenvalue)
         main_axis = axes[:, np.argmin(principal_moments_of_inertia)]
+        # Translate group A (using a position in a list of atoms as criteria)
+        # along the main axis by delta_d
+        translation_vector = delta_d * main_axis
     else:
         # Main axis (largest eigenvalue)
-        main_axis = axes[:, np.argmax(principal_moments_of_inertia)]
+        main_axis = axes[:, np.argmin(principal_moments_of_inertia)]
+        main_axis2 = axes[:, np.argmax(principal_moments_of_inertia)]
+        # Translate group A (using a position in a list of atoms as criteria)
+        # along the main axis by delta_d
+        translation_vector = delta_d * 2 \
+            * ( main_axis - main_axis2 )
 
-    # Translate group A (using a position in a list of atoms as criteria)
-    # along the main axis by delta_d
-    translation_vector = delta_d * main_axis
+
     coords[0:position_lim] += translation_vector
 
     return coords
@@ -136,7 +142,7 @@ def create_AB_dist_guessinggroup(atoms, delta_d):
 
     return coords_final
 
-def save_pdb_separation(pdb_file, delta_d, position_lim):
+def save_pdb_separation(pdb_file, delta_d, position_lim, suffix):
     """
     Call create_AB_distance() to create a new
     coordinates from the same structure separating
@@ -152,6 +158,7 @@ def save_pdb_separation(pdb_file, delta_d, position_lim):
         atom_threshold_num (int): the atom position on
          the pdb file where represents one group of
          atoms, i.e. amino acid.
+        suffix (str): the suffix for the new pdb version
     
     Returns:
         output_pdb (str): The adjusted PDB file.
@@ -191,13 +198,11 @@ def save_pdb_separation(pdb_file, delta_d, position_lim):
     mol1_2.AddConformer(conf1_2)
 
     # Save to a PDB file
-    suffix="v1"
-    new_pdb = re.sub(r"(\.pdb)$", f".{suffix}\\1", pdb_file)
+    new_pdb = re.sub(r"(\.pdb)$", f".v1.{suffix}\\1", pdb_file)
     Chem.rdmolfiles.MolToPDBFile(mol1_1, new_pdb)
 
     # Save to a PDB file
-    suffix="v2"
-    new_pdb = re.sub(r"(\.pdb)$", f".{suffix}\\1", pdb_file)
+    new_pdb = re.sub(r"(\.pdb)$", f".v2.{suffix}\\1", pdb_file)
     Chem.rdmolfiles.MolToPDBFile(mol1_2, new_pdb)
 
 def main():
@@ -215,7 +220,8 @@ def main():
     with open(filename, 'r') as file:
         for line in file:
             current_file = line.strip()
-            save_pdb_separation(current_file, delta_d, position_lim)
+            save_pdb_separation(current_file, delta_d, position_lim, "i")
+            save_pdb_separation(current_file, -delta_d, position_lim, "d")
 
 if __name__ == "__main__":
     main()
