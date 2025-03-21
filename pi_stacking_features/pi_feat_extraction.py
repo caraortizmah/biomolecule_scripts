@@ -1,9 +1,7 @@
 import sys
-import re
 import numpy as np
 from ase.io import read
-from rdkit import Chem
-from rdkit.Geometry import Point3D
+import pandas as pd
 
 
 def get_aromatic_dihedral(coords1, coords2):
@@ -131,93 +129,6 @@ def get_inertia_tensor(atoms, fullinfo=False):
     else:
         return inertia_tensor, center_of_mass
 
-#*
-def create_AB_distance(atoms, delta_d, position_lim, armin=True):
-    """
-    Function that uses the moments of inertia
-    of a molecule to create a separation between two group
-    of atoms distributed in the eigenvector corresponding to 
-    the smallest eigenvalue: the axis along changes of 
-    inertia are lower; the main axis of separation.
-    The distance separation is delta_d.
-    position_lim is a number that indicate up to which atom 
-    position will be considered as a group of atoms to be 
-    translated along the main axis.
-    Having armin True as default the smallest eigenvalue is 
-    used from the principal moments of inertia.
-    if armin is False, then the largest eigenvalue is used.
-    """
-
-    coords = atoms.get_positions()  # x, y, z coordinates
-
-    # Get the intertia tensor and the center of the mass
-    inertia_tensor = get_inertia_tensor(atoms)#, True)
-
-    # Compute the principal moments of inertia (eigenvalues of the inertia tensor)
-    principal_moments_of_inertia, axes = np.linalg.eig(inertia_tensor)
-    
-    if armin:
-        # Main axis (smallest eigenvalue)
-        main_axis = axes[:, np.argmin(principal_moments_of_inertia)]
-        # Translate group A (using a position in a list of atoms as criteria)
-        # along the main axis by delta_d
-        translation_vector = delta_d * main_axis
-    else:
-        # Main axis (largest eigenvalue)
-        main_axis = axes[:, np.argmin(principal_moments_of_inertia)]
-        main_axis2 = axes[:, np.argmax(principal_moments_of_inertia)]
-        # Translate group A (using a position in a list of atoms as criteria)
-        # along the main axis by delta_d
-        translation_vector = delta_d * 2 \
-            * ( main_axis - main_axis2 )
-
-
-    coords[0:position_lim] += translation_vector
-
-    return coords
-#*
-def create_AB_dist_guessinggroup(atoms, delta_d):
-    """
-    Function that uses the moments of inertia
-    of a molecule to create a separation between two group
-    of atoms distributed in the eigenvector corresponding to 
-    the smallest eigenvalue (the main axis of separation).
-    The distance separation is delta_d.
-    The criteria of separation between group A and B will
-    depend on the eigenvector that corresponds to the 
-    smallest eigenvalue (axis along changes of inertia are lower).
-    """
-
-    coords = atoms.get_positions()  # x, y, z coordinates
-
-    # Get the intertia tensor and the center of the mass
-    inertia_tensor, com = get_inertia_tensor(atoms, True)
-
-    # Compute the principal moments of inertia (eigenvalues of the inertia tensor)
-    principal_moments_of_inertia, axes = np.linalg.eig(inertia_tensor)
-    
-    # Main axis (largest eigenvalue)
-    main_axis = axes[:, np.argmin(principal_moments_of_inertia)]
-    # Translate coordinates to the center of mass
-    centered_coords = coords - com
-    
-    # Project coordinates onto the main axis
-    projections = np.dot(centered_coords, main_axis)
-
-    # Separate into two groups
-    median_proj = np.median(projections)
-    group_A_indices = np.where(projections < median_proj)[0]
-
-    # Translate group A along the main axis by delta_d
-    translation_vector = delta_d * main_axis
-    centered_coords[group_A_indices] += translation_vector
-
-    # Reconstruct the final coordinates
-    coords_final = centered_coords + com
-
-    return coords_final
-
-#get pi_stacking related features
 def get_pi_stacking_features(pdb_file, atm_indx_planes, atm_indx_rings): 
     """
     Function that uses a pdb file and position atoms
@@ -290,15 +201,16 @@ def get_pi_stacking_features(pdb_file, atm_indx_planes, atm_indx_rings):
 
     # Compute the principal moments of inertia (eigenvalues of the inertia tensor)
     principal_moments_of_inertia, axes = np.linalg.eig(inertia_tensor)
-
-    return np.array([pi_stacking_distance, dihedral_angle, in_plane_displacement,\
-           principal_moments_of_inertia, com])
+    
+    return [pi_stacking_distance, dihedral_angle, in_plane_displacement,\
+           principal_moments_of_inertia, com]
+    #return np.array([pi_stacking_distance, dihedral_angle, in_plane_displacement,\
+    #       principal_moments_of_inertia, com], dtype=object)
 
 def save_features(pdb_file, indx_planes, indx_rings, filename="pi_features_results"):
     """
     Function that saves the computed features by the 
-     function get_pi_stacking_features() in a csv and
-     raw format.
+     function get_pi_stacking_features() in a csv format.
     """
     
     # Set header for output files
@@ -308,26 +220,26 @@ def save_features(pdb_file, indx_planes, indx_rings, filename="pi_features_resul
 
     # Hand-craft extraction of structural features based on pi stacking 
     pi_features = get_pi_stacking_features(pdb_file, indx_planes, indx_rings)
-
-    data = [pdb_file] + list(pi_features)
-
+    
+    data = [pdb_file] + pi_features
+    
     # Save as CSV
     df = pd.DataFrame([data], columns=header)
-    df.to_csv(f"{filename}.csv", index=False)
-
-    # Save as DAT (space-separated)
-    np.savetxt(f"{filename}.dat", [data], fmt="%s", delimiter=" ")
-
+    # Append to the file if it exists, create a new file if it doesn't
+    df.to_csv(f"{filename}.csv", index=False, mode='a', \
+              header=not pd.io.common.file_exists(f"{filename}.csv"))
+    # Last command ensures that the header is written only once
+    
 def main():
 
     import ast
 
     # Check for the correct number of arguments
-    if len(sys.argv) != 4:
-        print("Usage: python pi_feat_extraction.py pdb_list.txt \"[1, 2, 3, 4, 5, 6]\" \
-              \"[1, 2, 3, 4, 5, 6]\" name_file_pi_features_results")
-        print("Where the two arrays are the same position atoms on all the pdb files in the \
-              pdb_list.txt")
+    if len(sys.argv) != 5:
+        print("Usage: python pi_feat_extraction.py pdb_list.txt \"[1, 2, 3, 4, 5, 6]\"")
+        print("  \"[1, 2, 3, 4, 5, 6]\" name_file_pi_features_results")
+        print("Where the two arrays are the same position atoms in all the pdb files in the")
+        print("  pdb_list.txt")
         sys.exit(1)
 
     # Parse command-line arguments
@@ -336,7 +248,7 @@ def main():
     plane_array = np.array(plane_array) - 1
     ring_array = ast.literal_eval(sys.argv[3])
     ring_array = np.array(ring_array) - 1
-    output_file = int(sys.argv[4])
+    output_file = sys.argv[4]
     
     with open(filename, 'r') as file:
         for line in file:
