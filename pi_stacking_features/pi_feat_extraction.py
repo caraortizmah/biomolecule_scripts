@@ -3,7 +3,6 @@ import re
 import numpy as np
 from ase.io import read
 from rdkit import Chem
-#from rdkit.Chem import rdDistGeom, AllChem
 from rdkit.Geometry import Point3D
 
 
@@ -221,24 +220,35 @@ def create_AB_dist_guessinggroup(atoms, delta_d):
 #get pi_stacking related features
 def get_pi_stacking_features(pdb_file, atm_indx_planes, atm_indx_rings): 
     """
-    Call create_AB_distance() to create a new
-    coordinates from the same structure separating
-    a group of atoms, from the first on the pdb file
-    until the position number atom_threshold_num to
-    the rest of atoms by delta_d Angstroms.
+    Function that uses a pdb file and position atoms
+    in that file as indices to extract structural 
+    features related to (specifically) pi-stacking
+    between atomatic amino acids.
 
     Args:
         pdb_file (str): PDB file.
-        delta_d (float): Desired change in separation 
-        distance (positive to increase,
-         negative to decrease).
-        atom_threshold_num (int): the atom position on
-         the pdb file where represents one group of
-         atoms, i.e. amino acid.
-        suffix (str): the suffix for the new pdb version
+        atm_indx_planes (numpy.ndarray): A 6-element array that 
+         contains position numbers of the target atoms in the
+         PDB file. The 3 first elements should correspond to 
+         three atoms of the aromatic side chain of one amino acid
+         and the last 3 elements of the array should correspond to
+         other three atoms of another aromatic side chain of other
+         amino acid.
+        atm_indx_rings (numpy.ndarray): A 6-element array that 
+         contains position numbers of the target atoms in the
+         PDB file. The 3 first elements should correspond to 
+         three atoms of the bencene of one amino acid and the 
+         last 3 elements of the array should correspond to
+         other three atoms of another bencene of other amino acid.
     
     Returns:
-        output_pdb (str): The adjusted PDB file.
+        output_pdb (numpy.ndarray): Pi-stacking features ordered as
+         1. Pi stacking distance, 2. Dihedral angle between both 
+         planes of the aromatic rings, 3. In-plane displacement 
+         from the bencene ring of the aromatic side chains,
+         4. Principal moments of inertia of the whole molecule and
+         its 5. Center of mass.
+         
     """
 
     structure_atoms = read(pdb_file)
@@ -281,86 +291,57 @@ def get_pi_stacking_features(pdb_file, atm_indx_planes, atm_indx_rings):
     # Compute the principal moments of inertia (eigenvalues of the inertia tensor)
     principal_moments_of_inertia, axes = np.linalg.eig(inertia_tensor)
 
-    return pi_stacking_distance, dihedral_angle, in_plane_displacement,\
-           principal_moments_of_inertia, com
+    return np.array([pi_stacking_distance, dihedral_angle, in_plane_displacement,\
+           principal_moments_of_inertia, com])
 
-def save_features(pdb_file, indx_planes, indx_rings):
+def save_features(pdb_file, indx_planes, indx_rings, filename="pi_features_results"):
     """
+    Function that saves the computed features by the 
+     function get_pi_stacking_features() in a csv and
+     raw format.
     """
+    
+    # Set header for output files
+    header = ["Pdb_file"] + ["Pi_stacking_distance"] + ["Dihedral_angle"] + \
+             ["in_place_displacement"] + ["principal_moments_of_intertia"] + \
+             ["center_of_mass"]
 
+    # Hand-craft extraction of structural features based on pi stacking 
     pi_features = get_pi_stacking_features(pdb_file, indx_planes, indx_rings)
 
-    print (pdb_file, pi_features)
+    data = [pdb_file] + list(pi_features)
 
-    # Create a RDKit molecule object for the new coordinates
-    # creating an artificial plane with 3 atoms of the aromatic ring
-    plane_1 = Chem.RWMol()
-    # Extracting only 3 atoms using the indices
-    for indx in atom_indices[0:3]:
-        atom = structure_atoms[indx]
-        atom_num = int(atom.number)
-        plane_1.AddAtom(Chem.Atom(atom_num))
+    # Save as CSV
+    df = pd.DataFrame([data], columns=header)
+    df.to_csv(f"{filename}.csv", index=False)
 
-    plane_2 = Chem.RWMol()
-    # Extracting only 3 atoms using of the indices
-    for indx in atom_indices[-3:]:
-        atom = structure_atoms[indx]
-        atom_num = int(atom.number)
-        plane_2.AddAtom(Chem.Atom(atom_num))
-
-    #for atom in structure_atoms:
-    #    atom_num = int(atom.number)  # Atomic number from ASE
-    #    mol1_1.AddAtom(Chem.Atom(atom_num))
-
-    # Create another RDKit molecule having another coordinates
-    #mol1_2 = Chem.RWMol()
-    #for atom in structure_atoms:
-    #    atom_num = int(atom.number)  # Atomic number from ASE
-    #    mol1_2.AddAtom(Chem.Atom(atom_num))
-
-    # Add 3D coordinates to RDKit molecule
-    conf1_1 = Chem.Conformer(mol1_1.GetNumAtoms())
-    for i, atom_coords in enumerate(\
-        create_AB_distance(structure_atoms, \
-                           delta_d, position_lim)):
-        x, y, z = atom_coords  # Atom coordinates from the function
-        conf1_1.SetAtomPosition(i, Point3D(x, y, z))
-    mol1_1.AddConformer(conf1_1)
-
-    conf1_2 = Chem.Conformer(mol1_2.GetNumAtoms())
-    for i, atom_coords in enumerate(\
-        create_AB_distance(structure_atoms, \
-                           delta_d, position_lim, \
-                            armin=False)):
-        x, y, z = atom_coords  # Atom coordinates from the function
-        conf1_2.SetAtomPosition(i, Point3D(x, y, z))
-    mol1_2.AddConformer(conf1_2)
-
-    # Save to a PDB file
-    new_pdb = re.sub(r"(\.pdb)$", f".v1.{suffix}\\1", pdb_file)
-    Chem.rdmolfiles.MolToPDBFile(mol1_1, new_pdb)
-
-    # Save to a PDB file
-    new_pdb = re.sub(r"(\.pdb)$", f".v2.{suffix}\\1", pdb_file)
-    Chem.rdmolfiles.MolToPDBFile(mol1_2, new_pdb)
+    # Save as DAT (space-separated)
+    np.savetxt(f"{filename}.dat", [data], fmt="%s", delimiter=" ")
 
 def main():
 
+    import ast
+
     # Check for the correct number of arguments
     if len(sys.argv) != 4:
-        print("Usage: python create_distance_pairaa.py pdb_list.txt distance_separation nth_atom")
+        print("Usage: python pi_feat_extraction.py pdb_list.txt \"[1, 2, 3, 4, 5, 6]\" \
+              \"[1, 2, 3, 4, 5, 6]\" name_file_pi_features_results")
+        print("Where the two arrays are the same position atoms on all the pdb files in the \
+              pdb_list.txt")
         sys.exit(1)
 
     # Parse command-line arguments
     filename = sys.argv[1]
-    delta_d = float(sys.argv[2])
-    position_lim = int(sys.argv[3])
+    plane_array = ast.literal_eval(sys.argv[2]) # Converts "[1,2,3,4,5,6]" to [1, 2, 3, 4, 5, 6]
+    plane_array = np.array(plane_array) - 1
+    ring_array = ast.literal_eval(sys.argv[3])
+    ring_array = np.array(ring_array) - 1
+    output_file = int(sys.argv[4])
     
     with open(filename, 'r') as file:
         for line in file:
             current_file = line.strip()
-            save_pdb_separation(current_file, delta_d, position_lim, "i")
-            save_pdb_separation(current_file, -delta_d, position_lim, "d")
+            save_features(current_file,plane_array,ring_array,output_file)
 
 if __name__ == "__main__":
     main()
